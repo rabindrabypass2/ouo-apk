@@ -64,6 +64,38 @@ public class MainActivity extends AppCompatActivity {
 
     private static final Random RANDOM = new Random();
 
+    // Early anti-ad shield injected immediately at page start
+    private static final String SCRIPT_EARLY_SHIELD =
+        "(function(){\n" +
+        "    try {\n" +
+        "        window.open = function() { return { closed: true, location: { href: 'about:blank' } }; };\n" +
+        "        var _origReplace = window.location.replace.bind(window.location);\n" +
+        "        window.location.replace = function(u) {\n" +
+        "            if (!u) return;\n" +
+        "            var s = (u + '').toLowerCase();\n" +
+        "            if (s.indexOf('ouo.io') !== -1 || s.indexOf('ouo.press') !== -1 || s.indexOf('cloudflare') !== -1) {\n" +
+        "                _origReplace(u);\n" +
+        "            }\n" +
+        "        };\n" +
+        "        window.addEventListener('click', function(e) {\n" +
+        "            var t = e.target;\n" +
+        "            while (t && t !== document) {\n" +
+        "                if (t.tagName === 'A' && t.href) {\n" +
+        "                    var h = (t.href + '').toLowerCase();\n" +
+        "                    if (h.indexOf('ouo.io') === -1 && h.indexOf('ouo.press') === -1 && !t.closest('#form-go') && !t.closest('#form-captcha')) {\n" +
+        "                        e.preventDefault();\n" +
+        "                        e.stopPropagation();\n" +
+        "                        return false;\n" +
+        "                    }\n" +
+        "                }\n" +
+        "                t = t.parentNode;\n" +
+        "            }\n" +
+        "        }, true);\n" +
+        "        window.blurred = false;\n" +
+        "        window.onblur = null;\n" +
+        "    } catch(e){}\n" +
+        "})();";
+
     // Clean Direct Automation Script for ouo.io
     private static final String SCRIPT_OUO = 
         "(function(){\n" +
@@ -158,6 +190,14 @@ public class MainActivity extends AppCompatActivity {
         "        } catch(e) {}\n" +
         "    }\n" +
         "\n" +
+        "    function notifyStep2() {\n" +
+        "        try {\n" +
+        "            if (window.AndroidBridge && typeof window.AndroidBridge.onStep2Submitted === 'function') {\n" +
+        "                window.AndroidBridge.onStep2Submitted();\n" +
+        "            }\n" +
+        "        } catch(e) {}\n" +
+        "    }\n" +
+        "\n" +
         "    // Single-window popup interceptor: ignore rogue ad popups\n" +
         "    var fakeTab = {\n" +
         "        location: {\n" +
@@ -213,49 +253,59 @@ public class MainActivity extends AppCompatActivity {
         "\n" +
         "    if (checkDestination()) return;\n" +
         "\n" +
-        "    E();\n" +
+        "    function executeFlow() {\n" +
+        "        E();\n" +
         "\n" +
-        "    var f2 = D('form-go');\n" +
-        "    if (f2) {\n" +
-        "        notifyStatus('OUO Step 2: Submitting form-go...');\n" +
-        "        N(f2.getAttribute('action'), { '_token': V('_token', f2), 'x-token': V('x-token', f2) });\n" +
-        "        return;\n" +
-        "    }\n" +
+        "        var f2 = D('form-go');\n" +
+        "        if (f2) {\n" +
+        "            notifyStatus('OUO Step 2: Submitting form-go...');\n" +
+        "            notifyStep2();\n" +
+        "            N(f2.getAttribute('action'), { '_token': V('_token', f2), 'x-token': V('x-token', f2) });\n" +
+        "            return true;\n" +
+        "        }\n" +
         "\n" +
-        "    var f1 = D('form-captcha');\n" +
-        "    if (!f1) {\n" +
-        "        console.log('ouo skip: no gate on this page');\n" +
-        "        return;\n" +
-        "    }\n" +
+        "        var f1 = D('form-captcha');\n" +
+        "        if (!f1) {\n" +
+        "            return false;\n" +
+        "        }\n" +
         "\n" +
-        "    notifyStatus('OUO Step 1: Solving Turnstile...');\n" +
+        "        notifyStatus('OUO Step 1: Solving Turnstile...');\n" +
         "\n" +
-        "    var run = function() {\n" +
-        "        return S().then(function(x) {\n" +
-        "            notifyStatus('Turnstile Token Ready! Submitting Step 1...');\n" +
-        "            var d = { '_token': V('_token', f1), 'x-token': x, 'v-token': V('v-token', f1) };\n" +
-        "            if (x) d['cf-turnstile-response'] = x;\n" +
-        "            return P(A(f1.getAttribute('action')), d);\n" +
-        "        }).then(function(h) {\n" +
-        "            notifyStatus('Step 1 Done -> Parsing Step 2...');\n" +
-        "            var p = new DOMParser().parseFromString(h, 'text/html'),\n" +
-        "            g = D('form-go', p) || p.querySelector('form[action*=\"xreallcygo\"]'),\n" +
-        "            t = V('_token', p);\n" +
-        "            if (!g || !t) throw new Error('step2 missing');\n" +
-        "            try { history.replaceState(null, '', '/go/' + C()); } catch(e) {}\n" +
-        "            notifyStatus('Submitting Step 2...');\n" +
-        "            N(g.getAttribute('action'), { '_token': t, 'x-token': V('x-token', p) });\n" +
+        "        var run = function() {\n" +
+        "            return S().then(function(x) {\n" +
+        "                notifyStatus('Turnstile Ready! Submitting Step 1...');\n" +
+        "                var d = { '_token': V('_token', f1), 'x-token': x, 'v-token': V('v-token', f1) };\n" +
+        "                if (x) d['cf-turnstile-response'] = x;\n" +
+        "                return P(A(f1.getAttribute('action')), d);\n" +
+        "            }).then(function(h) {\n" +
+        "                notifyStatus('Step 1 Done -> Parsing Step 2...');\n" +
+        "                var p = new DOMParser().parseFromString(h, 'text/html'),\n" +
+        "                g = D('form-go', p) || p.querySelector('form[action*=\"xreallcygo\"]'),\n" +
+        "                t = V('_token', p);\n" +
+        "                if (!g || !t) throw new Error('step2 missing');\n" +
+        "                try { history.replaceState(null, '', '/go/' + C()); } catch(e) {}\n" +
+        "                notifyStatus('Submitting Step 2...');\n" +
+        "                notifyStep2();\n" +
+        "                N(g.getAttribute('action'), { '_token': t, 'x-token': V('x-token', p) });\n" +
+        "            });\n" +
+        "        };\n" +
+        "\n" +
+        "        run().catch(function(err) {\n" +
+        "            notifyStatus('Retrying Turnstile...');\n" +
+        "            try { turnstile.reset(); } catch(e) {}\n" +
+        "            return run();\n" +
+        "        }).catch(function(err) {\n" +
+        "            notifyStatus('Fallback route /fbc/ ...');\n" +
+        "            location.href = O + '/fbc/' + C();\n" +
         "        });\n" +
-        "    };\n" +
+        "        return true;\n" +
+        "    }\n" +
         "\n" +
-        "    run().catch(function(err) {\n" +
-        "        notifyStatus('Retrying Turnstile...');\n" +
-        "        try { turnstile.reset(); } catch(e) {}\n" +
-        "        return run();\n" +
-        "    }).catch(function(err) {\n" +
-        "        notifyStatus('Fallback route /fbc/ ...');\n" +
-        "        location.href = O + '/fbc/' + C();\n" +
-        "    });\n" +
+        "    if (!executeFlow()) {\n" +
+        "        var ivCheck = setInterval(function() {\n" +
+        "            if (executeFlow()) clearInterval(ivCheck);\n" +
+        "        }, 200);\n" +
+        "    }\n" +
         "})();";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -264,6 +314,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean isAutoReloading = false;
     private boolean isResetting = false;
     private boolean isHandlingError = false;
+    private volatile boolean isStep2Submitted = false;
     private String currentIp = "...";
 
     // 75-Second Watchdog Timer: If shortener stalls anywhere, reset and start fresh with a new IP
@@ -298,6 +349,15 @@ public class MainActivity extends AppCompatActivity {
                     tvStatus.setText(status);
                     armWatchdog();
                 }
+            });
+        }
+
+        @JavascriptInterface
+        public void onStep2Submitted() {
+            isStep2Submitted = true;
+            runOnUiThread(() -> {
+                tvStatus.setTextColor(Color.parseColor("#00E676"));
+                tvStatus.setText("Step 2 Submitted -> Awaiting Destination...");
             });
         }
 
@@ -375,6 +435,13 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     progressBar.setVisibility(View.GONE);
                 }
+                // Inject immediately as soon as page begins loading (at 15% and up)
+                if (newProgress >= 15 && view.getUrl() != null) {
+                    String u = view.getUrl().toLowerCase();
+                    if (u.contains("ouo.io") || u.contains("ouo.press")) {
+                        view.evaluateJavascript(SCRIPT_OUO, null);
+                    }
+                }
             }
 
             @Override
@@ -417,15 +484,18 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 if (url != null && !url.equals("about:blank")) {
-                    if (isDestinationUrl(url)) {
+                    String lower = url.toLowerCase();
+                    if (lower.contains("ouo.io") || lower.contains("ouo.press")) {
+                        isStep2Submitted = false;
+                        // Inject early ad shield and bypass script on page start
+                        view.evaluateJavascript(SCRIPT_EARLY_SHIELD, null);
+                        view.evaluateJavascript(SCRIPT_OUO, null);
+                    } else if (isStep2Submitted && isDestinationUrl(url)) {
                         tvStatus.setTextColor(Color.parseColor("#00E676"));
                         tvStatus.setText("Opening Destination...");
-                        return;
                     }
-                    String lower = url.toLowerCase();
                     if (lower.contains("google.com/search") || lower.contains("google.co.in/search") || lower.contains("koekke.net")) {
                         triggerSearchGateReload();
-                        return;
                     }
                 }
             }
@@ -545,21 +615,35 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean handleUrl(WebView view, String url) {
         if (url == null) return false;
-        if (isDestinationUrl(url)) {
-            checkAndHandleDestination(url);
+        String lower = url.toLowerCase();
+
+        // 1. Always allow internal ouo and cloudflare challenge URLs
+        if (lower.contains("ouo.io") || lower.contains("ouo.press") || lower.contains("cloudflare.com")) {
             return false;
         }
-        String lower = url.toLowerCase();
+
+        // 2. Search Gate detection
         if (lower.contains("google.com/search") || lower.contains("google.co.in/search") || lower.contains("koekke.net")) {
             triggerSearchGateReload();
             return true;
         }
+
+        // 3. Known rogue ads are always blocked
         if (isKnownRogueAdUrl(url)) {
             return true;
         }
-        if (url.startsWith("http://") || url.startsWith("https://")) {
+
+        // 4. If Step 2 has NOT been submitted yet, ANY external domain navigation is an AD REDIRECT! BLOCK IT!
+        if (!isStep2Submitted) {
+            return true;
+        }
+
+        // 5. Step 2 was submitted -> this external URL is the real destination!
+        if (isDestinationUrl(url)) {
+            checkAndHandleDestination(url);
             return false;
         }
+
         return true;
     }
 
@@ -773,6 +857,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshIpAndLoad(boolean reloadWeb) {
+        isStep2Submitted = false;
         wipeSession();
         armWatchdog();
 
